@@ -69,3 +69,24 @@ class QueryAnalytic(Base):
     query_text      = Column(String(500), nullable=True)            # first 500 chars of user message
     has_attachment  = Column(Boolean,     nullable=False, default=False)
     attachment_type = Column(String(16),  nullable=True)            # 'image' | 'pdf' | None
+
+
+class ApiUsage(Base):
+    """
+    One row per call to the public /v1/generate endpoint.
+    External applications authenticate with a shared API key and identify
+    themselves via the X-App-Name header. Captures full cost/token breakdown
+    so usage can be attributed per calling application.
+    """
+    __tablename__ = "api_usage"
+
+    usage_id    = Column(String(64),  primary_key=True)   # uuid4
+    application = Column(String(128), nullable=False)     # from X-App-Name header
+    query_text  = Column(String(500), nullable=True)      # first 500 chars of message
+    model_used  = Column(String(32),  nullable=False)
+    tokens_in   = Column(Integer,     nullable=False)
+    tokens_out  = Column(Integer,     nullable=False)
+    cost_usd    = Column(Float,       nullable=False)
+    cost_inr    = Column(Float,       nullable=False)
+    latency_ms  = Column(Float,       nullable=False)
+    timestamp   = Column(DateTime,    nullable=False, default=datetime.utcnow)

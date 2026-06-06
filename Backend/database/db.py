@@ -7,7 +7,7 @@ from datetime import datetime
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker, Session
 
-from .models import Base, UserProfile, ChatSession, QueryAnalytic
+from .models import Base, UserProfile, ChatSession, QueryAnalytic, ApiUsage
 
 logger = logging.getLogger(__name__)
 
@@ -168,6 +168,36 @@ def log_query(
         query_text      = (query_text or "")[:500] or None,
         has_attachment  = has_attachment,
         attachment_type = attachment_type,
+    )
+    db.add(record)
+    db.commit()
+    return record
+
+
+def log_api_usage(
+    db:          Session,
+    *,
+    application: str,
+    query_text:  str | None,
+    model_used:  str,
+    tokens_in:   int,
+    tokens_out:  int,
+    cost_usd:    float,
+    cost_inr:    float,
+    latency_ms:  float,
+) -> ApiUsage:
+    """Record one public /v1/generate call, attributed to the calling application."""
+    record = ApiUsage(
+        usage_id    = str(uuid.uuid4()),
+        application = application,
+        query_text  = (query_text or "")[:500] or None,
+        model_used  = model_used,
+        tokens_in   = tokens_in,
+        tokens_out  = tokens_out,
+        cost_usd    = cost_usd,
+        cost_inr    = cost_inr,
+        latency_ms  = round(latency_ms, 2),
+        timestamp   = datetime.utcnow(),
     )
     db.add(record)
     db.commit()
