@@ -1,7 +1,12 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Plus, Settings, Send, User, Paperclip, Trash2, X, FileText, Image, LayoutDashboard, Sun, Moon } from 'lucide-react';
+import { Plus, Settings, Send, User, Paperclip, Trash2, X, FileText, Image, LayoutDashboard, Sun, Moon, LogOut, ShieldCheck } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
+import { onAuthStateChanged, signOut } from 'firebase/auth';
+import { auth } from './firebase';
+import AuthPage from './AuthPage';
 import MetricsView from './MetricsView';
+import SettingsPage from './SettingsPage';
+import AdminPage from './AdminPage';
 import alumnxLogo from './assets/alumnxlogo_new.png';
 import './index.css';
 
@@ -14,6 +19,43 @@ const MODEL_PRICING = {
 
 function App() {
   const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
+
+  const [currentUser, setCurrentUser] = useState(undefined); // undefined = loading
+  const [isAdmin, setIsAdmin]         = useState(false);
+
+  useEffect(() => {
+    const unsub = onAuthStateChanged(auth, async (user) => {
+      setCurrentUser(user);
+      if (user) {
+        try {
+          const token = await user.getIdToken();
+          // Register user in DB on every login
+          await fetch(`${API_BASE_URL}/admin/register`, {
+            method: 'POST',
+            headers: { Authorization: `Bearer ${token}` },
+          });
+          // Check admin status
+          const res = await fetch(`${API_BASE_URL}/admin/check`, {
+            headers: { Authorization: `Bearer ${token}` },
+          });
+          if (res.ok) {
+            const data = await res.json();
+            setIsAdmin(data.is_admin === true);
+          }
+        } catch {
+          setIsAdmin(false);
+        }
+      } else {
+        setIsAdmin(false);
+      }
+    });
+    return unsub;
+  }, []);
+
+  const getToken = async () => {
+    if (!currentUser) return null;
+    return currentUser.getIdToken();
+  };
 
   const [conversations, setConversations] = useState(() => {
     const saved = localStorage.getItem('gemma_conversations');
@@ -69,15 +111,7 @@ function App() {
     return [];
   });
 
-  const [userId] = useState(() => {
-    const saved = localStorage.getItem('gemma_user_id');
-    if (saved) return saved;
-    const newId = (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function')
-      ? crypto.randomUUID()
-      : `user-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
-    localStorage.setItem('gemma_user_id', newId);
-    return newId;
-  });
+  const userId = currentUser?.uid ?? null;
 
   const [input, setInput] = useState('');
   const [selectedModel, setSelectedModel] = useState('gemma');
@@ -227,9 +261,11 @@ function App() {
         formData.append('model', selectedModel);
 
         setUploadProgress(0);
+        const fileToken = await getToken();
         data = await new Promise((resolve, reject) => {
           const xhr = new XMLHttpRequest();
           xhr.open('POST', `${API_BASE_URL}/chat-file`);
+          if (fileToken) xhr.setRequestHeader('Authorization', `Bearer ${fileToken}`);
           xhr.upload.onprogress = (ev) => {
             if (ev.lengthComputable) setUploadProgress(Math.round((ev.loaded / ev.total) * 100));
           };
@@ -245,9 +281,13 @@ function App() {
           xhr.send(formData);
         });
       } else {
+        const token = await getToken();
         const response = await fetch(`${API_BASE_URL}/chat`, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: {
+            'Content-Type': 'application/json',
+            ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
+          },
           body: JSON.stringify({ message: trimmed, session_id: sesssionId, user_id: userId, model: selectedModel }),
         });
         if (!response.ok) throw new Error('Failed to connect to Gemma E4B');
@@ -353,6 +393,14 @@ function App() {
 
   const isImageFile = (file) => file?.type?.startsWith('image/');
 
+  if (currentUser === undefined) {
+    return <div className="auth-page"><div className="auth-card"><p style={{ color: 'var(--text-secondary)' }}>Loading...</p></div></div>;
+  }
+
+  if (!currentUser) {
+    return <AuthPage />;
+  }
+
   return (
     <div className="app-container">
       {/* ========== Sidebar ========== */}
@@ -410,6 +458,15 @@ function App() {
               <span className="dashboard-nav-badge">{metricsData.length}</span>
             )}
           </button>
+          {isAdmin && (
+            <button
+              className={`dashboard-nav-btn ${view === 'admin' ? 'active' : ''}`}
+              onClick={() => setView('admin')}
+            >
+              <ShieldCheck size={15} />
+              <span>Admin</span>
+            </button>
+          )}
 {(conversations.length > 0 || messages.length > 0) && (
             <button className="dashboard-nav-btn nav-danger" onClick={clearAllConversations}>
               <Trash2 size={15} />
@@ -420,17 +477,43 @@ function App() {
 
         <div className="sidebar-footer">
           <div className="user-profile">
-            <div className="avatar">U</div>
-            <span>Guest User</span>
+            <div className="avatar">
+              {currentUser?.photoURL
+                ? <img src={currentUser.photoURL} alt="avatar" style={{ width: '100%', height: '100%', borderRadius: '50%', objectFit: 'cover' }} />
+                : (currentUser?.displayName?.[0] ?? currentUser?.email?.[0] ?? 'U').toUpperCase()
+              }
+            </div>
+            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {currentUser?.displayName || currentUser?.email || 'User'}
+            </span>
           </div>
-          <div className="settings-icons">
-            <Settings size={18} />
+          <div style={{ display: 'flex', gap: '0.5rem' }}>
+            <button
+              className="settings-icons"
+              title="Settings"
+              onClick={() => setView('settings')}
+              style={{ background: 'none', border: 'none', cursor: 'pointer', color: view === 'settings' ? 'var(--accent)' : 'inherit' }}
+            >
+              <Settings size={18} />
+            </button>
+            <button
+              className="settings-icons"
+              title="Sign out"
+              onClick={() => signOut(auth)}
+              style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'inherit' }}
+            >
+              <LogOut size={18} />
+            </button>
           </div>
         </div>
       </aside>
 
       {/* ========== Main Content ========== */}
-      {view === 'metrics' ? (
+      {view === 'settings' ? (
+        <SettingsPage theme={theme} setTheme={setTheme} />
+      ) : view === 'admin' ? (
+        <AdminPage />
+      ) : view === 'metrics' ? (
         <MetricsView
           metrics={metricsData}
           onClearMetrics={() => setMetricsData([])}

@@ -7,7 +7,10 @@ from datetime import datetime
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker, Session
 
-from .models import Base, UserProfile, ChatSession, QueryAnalytic
+import hashlib
+import secrets
+
+from .models import Base, UserProfile, ChatSession, QueryAnalytic, ApiKey
 
 logger = logging.getLogger(__name__)
 
@@ -75,22 +78,24 @@ def _run_migrations() -> None:
 
 # ── CRUD helpers ──────────────────────────────────────────────────────────────
 
-def upsert_user(db: Session, user_id: str) -> UserProfile:
-    """Create user on first visit; update last_seen on every subsequent request."""
+def upsert_user(db: Session, user_id: str, display_name: str | None = None) -> UserProfile:
+    """Create user on first visit; update last_seen and name on every subsequent request."""
     now  = datetime.utcnow()
     user = db.get(UserProfile, user_id)
     if user is None:
-        short = user_id[-6:].upper()
-        user  = UserProfile(
+        name = display_name or f"User-{user_id[-6:].upper()}"
+        user = UserProfile(
             user_id      = user_id,
-            display_name = f"User-{short}",
+            display_name = name,
             created_at   = now,
             last_seen    = now,
         )
         db.add(user)
-        logger.info("New user created: %s", user_id)
+        logger.info("New user created: %s (%s)", user_id, name)
     else:
         user.last_seen = now
+        if display_name:
+            user.display_name = display_name
     db.commit()
     return user
 
@@ -172,3 +177,47 @@ def log_query(
     db.add(record)
     db.commit()
     return record
+
+
+# ── API key helpers ───────────────────────────────────────────────────────────
+
+def _hash_key(raw: str) -> str:
+    return hashlib.sha256(raw.encode()).hexdigest()
+
+
+def create_api_key(db: Session, user_id: str) -> str:
+    """Delete any existing key for this user, generate a new one, return raw key (shown once)."""
+    raw = "tl-" + secrets.token_hex(32)
+    db.query(ApiKey).filter(ApiKey.user_id == user_id).delete()
+    db.add(ApiKey(
+        key_id     = str(uuid.uuid4()),
+        user_id    = user_id,
+        key_hash   = _hash_key(raw),
+        key_prefix = raw[:10],
+        created_at = datetime.utcnow(),
+    ))
+    db.commit()
+    logger.info("API key created for user: %s", user_id)
+    return raw
+
+
+def get_api_key_info(db: Session, user_id: str) -> ApiKey | None:
+    """Return the active ApiKey row for a user (no raw key)."""
+    return db.query(ApiKey).filter(ApiKey.user_id == user_id, ApiKey.is_active == True).first()
+
+
+def verify_api_key(db: Session, raw: str) -> str | None:
+    """Return user_id if key is valid and active, else None. Updates last_used."""
+    row = db.query(ApiKey).filter(ApiKey.key_hash == _hash_key(raw), ApiKey.is_active == True).first()
+    if row:
+        row.last_used = datetime.utcnow()
+        db.commit()
+        return row.user_id
+    return None
+
+
+def revoke_api_key(db: Session, user_id: str) -> None:
+    """Delete the API key for a user."""
+    db.query(ApiKey).filter(ApiKey.user_id == user_id).delete()
+    db.commit()
+    logger.info("API key revoked for user: %s", user_id)

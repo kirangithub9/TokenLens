@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import Boolean, Column, DateTime, Float, ForeignKey, Integer, String, Text
+from sqlalchemy import Boolean, Column, DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import DeclarativeBase
 
 
@@ -69,3 +69,15 @@ class QueryAnalytic(Base):
     query_text      = Column(String(500), nullable=True)            # first 500 chars of user message
     has_attachment  = Column(Boolean,     nullable=False, default=False)
     attachment_type = Column(String(16),  nullable=True)            # 'image' | 'pdf' | None
+
+
+class ApiKey(Base):
+    __tablename__ = "api_keys"
+
+    key_id     = Column(String(64),  primary_key=True)
+    user_id    = Column(String(64),  ForeignKey("user_profiles.user_id", ondelete="CASCADE"), nullable=False, unique=True)
+    key_hash   = Column(String(128), nullable=False, unique=True)   # SHA-256 — never store raw
+    key_prefix = Column(String(16),  nullable=False)                # first 10 chars for display
+    created_at = Column(DateTime,    nullable=False, default=datetime.utcnow)
+    last_used  = Column(DateTime,    nullable=True)
+    is_active  = Column(Boolean,     nullable=False, default=True)

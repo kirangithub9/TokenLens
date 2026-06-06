@@ -98,8 +98,30 @@ class FirebaseAuthMiddleware(BaseHTTPMiddleware):
         if request.method == "OPTIONS" or request.url.path in PUBLIC_ROUTES:
             return await call_next(request)
 
+        # If Firebase was not initialised (credentials not yet configured), pass through
+        if _firebase_app is None:
+            logger.warning("Firebase not initialised — skipping auth for %s", request.url.path)
+            return await call_next(request)
+
         # Extract Bearer token
         auth_header = request.headers.get("Authorization", "")
+
+        # API key path — tl- prefixed keys bypass Firebase verification
+        if auth_header.startswith("Bearer tl-"):
+            raw = auth_header.split(" ", 1)[1].strip()
+            from database import SessionLocal, verify_api_key
+            db = SessionLocal()
+            try:
+                uid = verify_api_key(db, raw)
+            finally:
+                db.close()
+            if not uid:
+                return JSONResponse(
+                    status_code=401,
+                    content={"error": "invalid_api_key", "detail": "API key is invalid or has been revoked."},
+                )
+            request.state.user = {"uid": uid, "email": "", "name": "", "firebase": {}}
+            return await call_next(request)
         if not auth_header.startswith("Bearer "):
             return JSONResponse(
                 status_code=401,

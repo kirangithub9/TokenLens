@@ -20,7 +20,8 @@ from pydantic import BaseModel
 from sqlalchemy import func, desc
 from sqlalchemy.orm import Session
 
-from database import SessionLocal, QueryLog, User
+from fastapi import Request
+from database import SessionLocal, QueryAnalytic, UserProfile
 
 logger = logging.getLogger(__name__)
 
@@ -78,7 +79,7 @@ class UserProfile(BaseModel):
 
 
 class RequestLog(BaseModel):
-    id: int
+    id: str
     session_id: str
     model_used: str
     input_tokens: int
@@ -130,13 +131,13 @@ def _ts(val) -> Optional[str]:
 def _model_breakdown(db: Session, user_id: str) -> list[ModelUsage]:
     rows = (
         db.query(
-            QueryLog.model_used,
-            func.count(QueryLog.id).label("requests"),
-            func.coalesce(func.sum(QueryLog.tokens_in), 0).label("input_tokens"),
-            func.coalesce(func.sum(QueryLog.tokens_out), 0).label("output_tokens"),
+            QueryAnalytic.model_used,
+            func.count(QueryAnalytic.query_id).label("requests"),
+            func.coalesce(func.sum(QueryAnalytic.tokens_in), 0).label("input_tokens"),
+            func.coalesce(func.sum(QueryAnalytic.tokens_out), 0).label("output_tokens"),
         )
-        .filter(QueryLog.user_id == user_id)
-        .group_by(QueryLog.model_used)
+        .filter(QueryAnalytic.user_id == user_id)
+        .group_by(QueryAnalytic.model_used)
         .all()
     )
 
@@ -170,13 +171,13 @@ def user_profile(user_id: str, db: Session = Depends(get_db)):
     """
     totals = (
         db.query(
-            func.count(QueryLog.id).label("requests"),
-            func.coalesce(func.sum(QueryLog.tokens_in),  0).label("input_tokens"),
-            func.coalesce(func.sum(QueryLog.tokens_out), 0).label("output_tokens"),
-            func.min(QueryLog.created_at).label("first_seen"),
-            func.max(QueryLog.created_at).label("last_seen"),
+            func.count(QueryAnalytic.query_id).label("requests"),
+            func.coalesce(func.sum(QueryAnalytic.tokens_in),  0).label("input_tokens"),
+            func.coalesce(func.sum(QueryAnalytic.tokens_out), 0).label("output_tokens"),
+            func.min(QueryAnalytic.timestamp).label("first_seen"),
+            func.max(QueryAnalytic.timestamp).label("last_seen"),
         )
-        .filter(QueryLog.user_id == user_id)
+        .filter(QueryAnalytic.user_id == user_id)
         .first()
     )
 
@@ -231,13 +232,13 @@ def user_history(
     Optionally filter by model (e.g. ?model=gpt4).
     Each row shows: model, tokens in/out, cost, latency, query preview.
     """
-    query = db.query(QueryLog).filter(QueryLog.user_id == user_id)
+    query = db.query(QueryAnalytic).filter(QueryAnalytic.user_id == user_id)
     if model:
-        query = query.filter(QueryLog.model_used == model.lower())
+        query = query.filter(QueryAnalytic.model_used == model.lower())
 
     total = query.count()
     rows  = (
-        query.order_by(desc(QueryLog.created_at))
+        query.order_by(desc(QueryAnalytic.timestamp))
         .offset((page - 1) * page_size)
         .limit(page_size)
         .all()
@@ -247,8 +248,8 @@ def user_history(
     for row in rows:
         cost = _price(row.model_used, row.tokens_in or 0, row.tokens_out or 0)
         results.append(RequestLog(
-            id=row.id,
-            session_id=row.session_id,
+            id=row.query_id,
+            session_id=row.session_id or "",
             model_used=row.model_used,
             input_tokens=row.tokens_in or 0,
             output_tokens=row.tokens_out or 0,
@@ -259,7 +260,7 @@ def user_history(
             has_attachment=bool(row.has_attachment),
             attachment_type=row.attachment_type,
             query_preview=row.query_text,
-            created_at=_ts(row.created_at),
+            created_at=_ts(row.timestamp),
         ))
 
     return PaginatedHistory(
@@ -282,13 +283,13 @@ def leaderboard(
     """
     rows = (
         db.query(
-            QueryLog.user_id,
-            func.count(QueryLog.id).label("requests"),
-            func.coalesce(func.sum(QueryLog.tokens_in),  0).label("input_tokens"),
-            func.coalesce(func.sum(QueryLog.tokens_out), 0).label("output_tokens"),
+            QueryAnalytic.user_id,
+            func.count(QueryAnalytic.query_id).label("requests"),
+            func.coalesce(func.sum(QueryAnalytic.tokens_in),  0).label("input_tokens"),
+            func.coalesce(func.sum(QueryAnalytic.tokens_out), 0).label("output_tokens"),
         )
-        .group_by(QueryLog.user_id)
-        .order_by(desc(func.sum(QueryLog.tokens_in) + func.sum(QueryLog.tokens_out)))
+        .group_by(QueryAnalytic.user_id)
+        .order_by(desc(func.sum(QueryAnalytic.tokens_in) + func.sum(QueryAnalytic.tokens_out)))
         .limit(top)
         .all()
     )
@@ -315,14 +316,14 @@ def model_aggregates(db: Session = Depends(get_db)):
     """
     rows = (
         db.query(
-            QueryLog.model_used,
-            func.count(func.distinct(QueryLog.user_id)).label("total_users"),
-            func.count(QueryLog.id).label("total_requests"),
-            func.coalesce(func.sum(QueryLog.tokens_in),  0).label("total_input"),
-            func.coalesce(func.sum(QueryLog.tokens_out), 0).label("total_output"),
+            QueryAnalytic.model_used,
+            func.count(func.distinct(QueryAnalytic.user_id)).label("total_users"),
+            func.count(QueryAnalytic.query_id).label("total_requests"),
+            func.coalesce(func.sum(QueryAnalytic.tokens_in),  0).label("total_input"),
+            func.coalesce(func.sum(QueryAnalytic.tokens_out), 0).label("total_output"),
         )
-        .group_by(QueryLog.model_used)
-        .order_by(desc(func.sum(QueryLog.tokens_in) + func.sum(QueryLog.tokens_out)))
+        .group_by(QueryAnalytic.model_used)
+        .order_by(desc(func.sum(QueryAnalytic.tokens_in) + func.sum(QueryAnalytic.tokens_out)))
         .all()
     )
 
@@ -336,5 +337,59 @@ def model_aggregates(db: Session = Depends(get_db)):
             total_input_tokens=row.total_input,
             total_output_tokens=row.total_output,
             total_cost_usd=cost["usd"],
+        ))
+    return result
+
+
+# ── Admin: all users ──────────────────────────────────────────────────────────
+
+class AdminUserModel(BaseModel):
+    user_id:            str
+    display_name:       str
+    total_requests:     int
+    total_tokens_in:    int
+    total_tokens_out:   int
+    total_cost_usd:     float
+    total_cost_inr:     float
+    last_seen:          Optional[str]
+    models:             list[ModelUsage]
+
+
+@router.get("/users", response_model=list[AdminUserModel])
+def all_users(request: Request, db: Session = Depends(get_db)):
+    """
+    All users with aggregated stats and per-model breakdown.
+    Used by the admin dashboard. Admin-only.
+    """
+    from admin_auth import require_admin
+    require_admin(request)
+
+    # Query all registered users from user_profiles (includes users with 0 chats)
+    profiles = db.query(UserProfile).order_by(desc(UserProfile.last_seen)).all()
+
+    result = []
+    for profile in profiles:
+        # Aggregate chat stats for this user (may be zero if they never chatted)
+        stats = (
+            db.query(
+                func.count(QueryAnalytic.query_id).label("requests"),
+                func.coalesce(func.sum(QueryAnalytic.tokens_in),  0).label("tokens_in"),
+                func.coalesce(func.sum(QueryAnalytic.tokens_out), 0).label("tokens_out"),
+            )
+            .filter(QueryAnalytic.user_id == profile.user_id)
+            .first()
+        )
+        models = _model_breakdown(db, profile.user_id)
+        total_cost_usd = sum(m.cost_usd for m in models)
+        result.append(AdminUserModel(
+            user_id=profile.user_id,
+            display_name=profile.display_name or profile.user_id,
+            total_requests=stats.requests if stats else 0,
+            total_tokens_in=stats.tokens_in if stats else 0,
+            total_tokens_out=stats.tokens_out if stats else 0,
+            total_cost_usd=round(total_cost_usd, 8),
+            total_cost_inr=round(total_cost_usd * USD_TO_INR, 6),
+            last_seen=_ts(profile.last_seen),
+            models=models,
         ))
     return result
