@@ -40,7 +40,7 @@ services:
 
       # OpenAI model to use (default: gpt-4o-mini)
       - key: OPENAI_MODEL
-        value: "gpt-5-nano"
+        value: "gpt-4o-mini"
 
       # ── Optional — safe to commit defaults ───────────────────────────────
       - key: USD_TO_INR
