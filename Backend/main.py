@@ -30,7 +30,7 @@ import json
 
 import httpx
 import PyPDF2
-from fastapi import BackgroundTasks, Depends, FastAPI, File, Form, Header, HTTPException, UploadFile
+from fastapi import BackgroundTasks, Depends, FastAPI, File, Form, Header, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from firebase_auth import FirebaseAuthMiddleware, init_firebase
