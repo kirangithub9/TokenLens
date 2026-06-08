@@ -29,7 +29,7 @@ import json
 
 import httpx
 import PyPDF2
-from fastapi import BackgroundTasks, FastAPI, File, Form, HTTPException, UploadFile, Request
+from fastapi import BackgroundTasks, Depends, FastAPI, File, Form, Header, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from firebase_auth import FirebaseAuthMiddleware, init_firebase
@@ -42,13 +42,17 @@ from memory import (
     summarize_in_background,
 )
 from memory.store import delete as delete_session
-from database import init_db, upsert_user, upsert_session, log_query, save_pdf_chunks, load_pdf_chunks, SessionLocal
+from database import init_db, upsert_user, upsert_session, log_query, log_api_usage, save_pdf_chunks, load_pdf_chunks, SessionLocal
 
 
 # ── env ───────────────────────────────────────────────────────────────────────
 OLLAMA_HOST  = os.getenv("OLLAMA_HOST")
 OLLAMA_MODEL = os.getenv("OLLAMA_MODEL")
 OLLAMA_KEY   = os.getenv("OLLAMA_API_KEY")
+
+# Common API key external applications must send in the X-API-Key header to use
+# the public /v1/generate endpoint. Leave unset to disable the public API.
+PUBLIC_API_KEY = os.getenv("PUBLIC_API_KEY", "")
 
 if not OLLAMA_HOST or not OLLAMA_MODEL:
     raise RuntimeError("Missing OLLAMA_HOST or OLLAMA_MODEL in .env")
@@ -192,6 +196,20 @@ class ChatResponse(BaseModel):
     latency_ms:  float
     cost:        Cost
     search_mode: str = "none"   # "semantic" | "keyword" | "none"
+
+
+# ── public API models (external callers via /v1/generate) ─────────────────────
+class PublicGenerateRequest(BaseModel):
+    message: str = Field(..., min_length=1, description="Prompt text for the model")
+    model:   str = Field(default="gemma", description="'gemma' (local) or 'gpt4' (OpenAI)")
+
+
+class PublicGenerateResponse(BaseModel):
+    response:   str
+    model:      str
+    usage:      Usage
+    cost:       Cost
+    latency_ms: float
 
 
 # ── low-level LLM callers ─────────────────────────────────────────────────────
@@ -407,6 +425,56 @@ def _persist_query(
         db.close()
 
 
+def _persist_api_usage(
+    application: str,
+    query_text:  str | None,
+    model_used:  str,
+    tokens_in:   int,
+    tokens_out:  int,
+    cost_usd:    float,
+    cost_inr:    float,
+    latency_ms:  float,
+) -> None:
+    """Sync DB writer for public-API usage — runs in FastAPI's background thread pool."""
+    db = SessionLocal()
+    try:
+        log_api_usage(
+            db,
+            application = application,
+            query_text  = query_text,
+            model_used  = model_used,
+            tokens_in   = tokens_in,
+            tokens_out  = tokens_out,
+            cost_usd    = cost_usd,
+            cost_inr    = cost_inr,
+            latency_ms  = latency_ms,
+        )
+    except Exception as exc:
+        logger.error("DB persist_api_usage failed: %s", exc)
+        db.rollback()
+    finally:
+        db.close()
+
+
+# ── public API auth ───────────────────────────────────────────────────────────
+
+async def require_api_key(
+    x_api_key:  str | None = Header(default=None, alias="X-API-Key"),
+    x_app_name: str | None = Header(default=None, alias="X-App-Name"),
+) -> str:
+    """
+    Authenticate a public-API caller against the shared PUBLIC_API_KEY and
+    return the calling application's name (from the X-App-Name header).
+    """
+    if not PUBLIC_API_KEY:
+        raise HTTPException(503, "Public API not configured")
+    if x_api_key != PUBLIC_API_KEY:
+        raise HTTPException(401, "Invalid or missing API key")
+    if not x_app_name or not x_app_name.strip():
+        raise HTTPException(400, "Missing X-App-Name header")
+    return x_app_name.strip()
+
+
 # ── endpoints ─────────────────────────────────────────────────────────────────
 
 @app.post("/chat", response_model=ChatResponse)
@@ -538,6 +606,56 @@ async def chat(req: ChatRequest, background_tasks: BackgroundTasks, request: Req
         latency_ms  = round(latency_ms, 2),
         search_mode = search_mode,
         usage       = Usage(
+            prompt_tokens     = prompt_tokens,
+            completion_tokens = completion_tokens,
+            total_tokens      = prompt_tokens + completion_tokens,
+        ),
+        cost = Cost(**cost),
+    )
+
+
+@app.post("/v1/generate", response_model=PublicGenerateResponse)
+async def public_generate(
+    req: PublicGenerateRequest,
+    background_tasks: BackgroundTasks,
+    application: str = Depends(require_api_key),
+):
+    """
+    Public, stateless model endpoint for external applications.
+
+    Auth:  X-API-Key header (shared PUBLIC_API_KEY) + X-App-Name header (identity).
+    No session, memory, or RAG — a single prompt in, a single response out.
+    Every call is logged to the `api_usage` table (application, query, model,
+    tokens in/out, cost USD + INR).
+    """
+    from memory.tokenizer import TokenCalculator
+
+    messages = [{"role": "user", "content": req.message}]
+
+    if _is_openai_model(req.model) and OPENAI_API_KEY:
+        result, latency_ms = await call_openai_with_messages(messages)
+    else:
+        result, latency_ms = await call_llm_with_messages(messages)
+
+    reply = result["response"]
+
+    calculator        = app.state.token_calculator
+    tokenizer_type    = TokenCalculator.route_tokenizer(req.model)
+    prompt_tokens     = result.get("prompt_tokens")     or calculator.count_messages_tokens(messages, req.model)
+    completion_tokens = result.get("completion_tokens") or calculator.count_tokens(reply, tokenizer_type)
+    cost              = compute_cost(prompt_tokens, completion_tokens, req.model)
+
+    background_tasks.add_task(
+        _persist_api_usage,
+        application, req.message[:500], req.model,
+        prompt_tokens, completion_tokens, cost["usd"], cost["inr"], latency_ms,
+    )
+
+    return PublicGenerateResponse(
+        response   = reply,
+        model      = req.model,
+        latency_ms = round(latency_ms, 2),
+        usage      = Usage(
             prompt_tokens     = prompt_tokens,
             completion_tokens = completion_tokens,
             total_tokens      = prompt_tokens + completion_tokens,

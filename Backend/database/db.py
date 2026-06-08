@@ -7,10 +7,7 @@ from datetime import datetime
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker, Session
 
-import hashlib
-import secrets
-
-from .models import Base, UserProfile, ChatSession, QueryAnalytic, ApiKey
+from .models import Base, UserProfile, ChatSession, QueryAnalytic, ApiUsage
 
 logger = logging.getLogger(__name__)
 
@@ -179,45 +176,31 @@ def log_query(
     return record
 
 
-# ── API key helpers ───────────────────────────────────────────────────────────
-
-def _hash_key(raw: str) -> str:
-    return hashlib.sha256(raw.encode()).hexdigest()
-
-
-def create_api_key(db: Session, user_id: str) -> str:
-    """Delete any existing key for this user, generate a new one, return raw key (shown once)."""
-    raw = "tl-" + secrets.token_hex(32)
-    db.query(ApiKey).filter(ApiKey.user_id == user_id).delete()
-    db.add(ApiKey(
-        key_id     = str(uuid.uuid4()),
-        user_id    = user_id,
-        key_hash   = _hash_key(raw),
-        key_prefix = raw[:10],
-        created_at = datetime.utcnow(),
-    ))
+def log_api_usage(
+    db:          Session,
+    *,
+    application: str,
+    query_text:  str | None,
+    model_used:  str,
+    tokens_in:   int,
+    tokens_out:  int,
+    cost_usd:    float,
+    cost_inr:    float,
+    latency_ms:  float,
+) -> ApiUsage:
+    """Record one public /v1/generate call, attributed to the calling application."""
+    record = ApiUsage(
+        usage_id    = str(uuid.uuid4()),
+        application = application,
+        query_text  = (query_text or "")[:500] or None,
+        model_used  = model_used,
+        tokens_in   = tokens_in,
+        tokens_out  = tokens_out,
+        cost_usd    = cost_usd,
+        cost_inr    = cost_inr,
+        latency_ms  = round(latency_ms, 2),
+        timestamp   = datetime.utcnow(),
+    )
+    db.add(record)
     db.commit()
-    logger.info("API key created for user: %s", user_id)
-    return raw
-
-
-def get_api_key_info(db: Session, user_id: str) -> ApiKey | None:
-    """Return the active ApiKey row for a user (no raw key)."""
-    return db.query(ApiKey).filter(ApiKey.user_id == user_id, ApiKey.is_active == True).first()
-
-
-def verify_api_key(db: Session, raw: str) -> str | None:
-    """Return user_id if key is valid and active, else None. Updates last_used."""
-    row = db.query(ApiKey).filter(ApiKey.key_hash == _hash_key(raw), ApiKey.is_active == True).first()
-    if row:
-        row.last_used = datetime.utcnow()
-        db.commit()
-        return row.user_id
-    return None
-
-
-def revoke_api_key(db: Session, user_id: str) -> None:
-    """Delete the API key for a user."""
-    db.query(ApiKey).filter(ApiKey.user_id == user_id).delete()
-    db.commit()
-    logger.info("API key revoked for user: %s", user_id)
+    return record
