@@ -29,10 +29,10 @@ router = APIRouter(prefix="/analytics", tags=["Analytics"])
 
 # ── pricing table (mirrors main.py _MODEL_PRICING) ───────────────────────────
 _MODEL_PRICING: dict[str, dict[str, float]] = {
-    "gemma":    {"input": 0.10 / 1_000_000, "output": 0.40 / 1_000_000},
-    "gpt4":     {"input": 1.10 / 1_000_000, "output": 4.40 / 1_000_000},
-    "gpt5nano": {"input": 1.10 / 1_000_000, "output": 4.40 / 1_000_000},
-    "openai":   {"input": 1.10 / 1_000_000, "output": 4.40 / 1_000_000},
+    "gemma":      {"input": 0.10 / 1_000_000, "output": 0.40 / 1_000_000},
+    "gpt4":       {"input": 0.15 / 1_000_000, "output": 0.60 / 1_000_000},
+    "gpt4o-mini": {"input": 0.15 / 1_000_000, "output": 0.60 / 1_000_000},
+    "openai":     {"input": 0.15 / 1_000_000, "output": 0.60 / 1_000_000},
 }
 USD_TO_INR = 85.0
 

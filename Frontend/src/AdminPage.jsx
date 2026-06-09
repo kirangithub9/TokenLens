@@ -9,23 +9,27 @@ import { auth } from './firebase';
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
 
 const MODEL_COLORS = {
-  gemma:    '#7c6df0',
-  gpt4:     '#10b981',
-  gpt5nano: '#f59e0b',
-  openai:   '#3b82f6',
+  gemma:      '#7c6df0',
+  gpt4:       '#10b981',
+  'gpt4o-mini': '#f59e0b',
+  openai:     '#3b82f6',
 };
 const DEFAULT_COLOR = '#9ca3af';
 
 const MODEL_LABELS = {
-  gemma:    'Gemma',
-  gpt4:     'GPT-5 Nano',
-  gpt5nano: 'GPT-5 Nano',
-  openai:   'OpenAI',
+  gemma:      'Gemma',
+  gpt4:       'GPT-4o Mini',
+  'gpt4o-mini': 'GPT-4o Mini',
+  openai:     'OpenAI',
 };
 
 async function authHeaders() {
-  const token = await auth.currentUser?.getIdToken();
-  return token ? { Authorization: `Bearer ${token}` } : {};
+  const user = auth.currentUser ?? await new Promise(resolve => {
+    const unsub = auth.onAuthStateChanged(u => { unsub(); resolve(u); });
+  });
+  if (!user) return {};
+  const token = await user.getIdToken();
+  return { Authorization: `Bearer ${token}` };
 }
 
 function fmt(n) {

@@ -18,6 +18,7 @@ from analytics import router as analytics_router
 from api_keys import router as api_keys_router
 from admin_auth import router as admin_router
 from agent_proxy import router as agent_proxy_router
+from fastapi.openapi.utils import get_openapi
 load_dotenv()
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -57,7 +58,7 @@ if not OLLAMA_HOST or not OLLAMA_MODEL:
 
 # OpenAI — optional. Required only when the frontend selects the gpt4 model.
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
-OPENAI_MODEL   = os.getenv("OPENAI_MODEL", "gpt-5-nano")  # override with gpt-4o, gpt-4, etc.
+OPENAI_MODEL   = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
 
 # Ollama embedding model for semantic PDF search.
 # Pull on your server with: ollama pull nomic-embed-text
@@ -75,14 +76,13 @@ _session_pdfs: dict[str, list[str]] = {}
 # ── pricing ───────────────────────────────────────────────────────────────────
 USD_TO_INR = float(os.getenv("USD_TO_INR", "85.0"))
 
-# GPT-5 Nano pricing (model: gpt-5-nano)
-# Input: $1.10/1M tokens  |  Output: $4.40/1M tokens
-# Update these if OpenAI changes the rates.
+# GPT-4o Mini pricing (model: gpt-4o-mini)
+# Input: $0.15/1M tokens  |  Output: $0.60/1M tokens
 _MODEL_PRICING: dict[str, dict[str, float]] = {
-    "gemma":    {"input": 0.10  / 1_000_000, "output": 0.40  / 1_000_000},
-    "gpt4":     {"input": 1.10  / 1_000_000, "output": 4.40  / 1_000_000},  # gpt-5-nano rates
-    "gpt5nano": {"input": 1.10  / 1_000_000, "output": 4.40  / 1_000_000},
-    "openai":   {"input": 1.10  / 1_000_000, "output": 4.40  / 1_000_000},
+    "gemma":      {"input": 0.10  / 1_000_000, "output": 0.40  / 1_000_000},
+    "gpt4":       {"input": 0.15  / 1_000_000, "output": 0.60  / 1_000_000},
+    "gpt4o-mini": {"input": 0.15  / 1_000_000, "output": 0.60  / 1_000_000},
+    "openai":     {"input": 0.15  / 1_000_000, "output": 0.60  / 1_000_000},
 }
 
 
@@ -131,6 +131,28 @@ async def lifespan(app: FastAPI):
 
 # ── app ───────────────────────────────────────────────────────────────────────
 app = FastAPI(title="Gemma4 Chat Service", version="3.0.0", lifespan=lifespan)
+
+
+def _custom_openapi():
+    if app.openapi_schema:
+        return app.openapi_schema
+    schema = get_openapi(title=app.title, version=app.version, routes=app.routes)
+    schema.setdefault("components", {})["securitySchemes"] = {
+        "BearerAuth": {
+            "type": "http",
+            "scheme": "bearer",
+            "bearerFormat": "Firebase JWT or tl-... API key",
+        }
+    }
+    for path in schema.get("paths", {}).values():
+        for op in path.values():
+            if isinstance(op, dict):
+                op.setdefault("security", [{"BearerAuth": []}])
+    app.openapi_schema = schema
+    return schema
+
+
+app.openapi = _custom_openapi
 
 UPLOAD_FOLDER = "uploads"
 
@@ -317,7 +339,7 @@ async def call_openai_with_messages(messages: list[dict]) -> tuple[dict, float]:
 
 
 def _is_openai_model(model: str) -> bool:
-    return model.lower().strip() in ("gpt4", "gpt-4", "gpt", "gpt5nano", "gpt-5-nano", "gpt5", "openai")
+    return model.lower().strip() in ("gpt4", "gpt-4", "gpt", "gpt4o-mini", "gpt-4o-mini", "openai")
 
 
 def _parse_ollama_response(raw: str) -> dict:

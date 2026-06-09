@@ -15,7 +15,7 @@ const MAX_FILE_SIZE = 3 * 1024 * 1024;
 const ALLOWED_TYPES = ['application/pdf', 'image/png', 'image/jpeg', 'image/gif', 'image/webp', 'image/svg+xml'];
 const MODEL_PRICING = {
   gemma: { input: 0.10 / 1_000_000, output: 0.40  / 1_000_000, label: 'Gemma' },
-  gpt4:  { input: 1.10 / 1_000_000, output: 4.40  / 1_000_000, label: 'GPT-5 Nano' },
+  gpt4:  { input: 0.15 / 1_000_000, output: 0.60  / 1_000_000, label: 'GPT-4o Mini' },
 };
 
 function App() {
@@ -693,7 +693,7 @@ function App() {
                   ref={textareaRef}
                   value={input}
                   onChange={handleInput}
-                  placeholder={`Message ${selectedModel === 'gpt4' ? 'GPT-5 Nano' : 'TokenLens'}...`}
+                  placeholder={`Message ${selectedModel === 'gpt4' ? 'GPT-4o Mini' : 'TokenLens'}...`}
                   rows="1"
                   onKeyDown={(e) => {
                     if (e.key === 'Enter' && !e.shiftKey) {
@@ -716,7 +716,7 @@ function App() {
                     className="model-select"
                   >
                     <option value="gemma">Gemma</option>
-                    <option value="gpt4">GPT-5 Nano</option>
+                    <option value="gpt4">GPT-4o Mini</option>
                   </select>
                   <button
                     type="button"
@@ -732,7 +732,7 @@ function App() {
                   </button>
                 </div>
               </div>
-              <p className="disclaimer">{selectedModel === 'gpt4' ? 'GPT-5 Nano' : 'Gemma E4B'} can make mistakes. Check important info.</p>
+              <p className="disclaimer">{selectedModel === 'gpt4' ? 'GPT-4o Mini' : 'Gemma E4B'} can make mistakes. Check important info.</p>
             </form>
           </footer>
         </main>
