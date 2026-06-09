@@ -4,8 +4,6 @@ import {
   ResponsiveContainer, CartesianGrid,
 } from 'recharts';
 import { Users, Zap, DollarSign, Activity, ChevronDown, ChevronUp, RefreshCw } from 'lucide-react';
-import { auth } from './firebase';
-
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
 
 const MODEL_COLORS = {
@@ -22,15 +20,6 @@ const MODEL_LABELS = {
   'gpt4o-mini': 'GPT-4o Mini',
   openai:     'OpenAI',
 };
-
-async function authHeaders() {
-  const user = auth.currentUser ?? await new Promise(resolve => {
-    const unsub = auth.onAuthStateChanged(u => { unsub(); resolve(u); });
-  });
-  if (!user) return {};
-  const token = await user.getIdToken();
-  return { Authorization: `Bearer ${token}` };
-}
 
 function fmt(n) {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
@@ -197,7 +186,11 @@ function UserCard({ user }) {
   );
 }
 
-export default function AdminPage() {
+export default function AdminPage({ getToken }) {
+  const authHeaders = async () => {
+    const token = await getToken();
+    return token ? { Authorization: `Bearer ${token}` } : {};
+  };
   const [users, setUsers]     = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError]     = useState('');

@@ -518,11 +518,11 @@ function App() {
 
       {/* ========== Main Content ========== */}
       {view === 'settings' ? (
-        <SettingsPage theme={theme} setTheme={setTheme} />
+        <SettingsPage theme={theme} setTheme={setTheme} getToken={getToken} />
       ) : view === 'admin' ? (
-        <AdminPage />
+        <AdminPage getToken={getToken} />
       ) : view === 'agents' ? (
-        <AgentRunsPage />
+        <AgentRunsPage getToken={getToken} />
       ) : view === 'metrics' ? (
         <MetricsView
           metrics={metricsData}

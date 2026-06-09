@@ -1,21 +1,13 @@
 import React, { useState, useEffect } from 'react';
 import { Copy, RefreshCw, Trash2, Key, Check } from 'lucide-react';
-import { auth } from './firebase';
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
 
-async function authHeaders() {
-  // auth.currentUser can be null briefly on mount before Firebase restores the session.
-  // Wait for the next auth state event if needed instead of sending no token.
-  const user = auth.currentUser ?? await new Promise(resolve => {
-    const unsub = auth.onAuthStateChanged(u => { unsub(); resolve(u); });
-  });
-  if (!user) return {};
-  const token = await user.getIdToken();
-  return { Authorization: `Bearer ${token}` };
-}
-
-export default function SettingsPage({ theme, setTheme }) {
+export default function SettingsPage({ theme, setTheme, getToken }) {
+  const authHeaders = async () => {
+    const token = await getToken();
+    return token ? { Authorization: `Bearer ${token}` } : {};
+  };
   const [keyInfo, setKeyInfo]       = useState(null);   // { key_prefix, created_at, last_used }
   const [newKey, setNewKey]         = useState('');      // shown once after generation
   const [loading, setLoading]       = useState(true);

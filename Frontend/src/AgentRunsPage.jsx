@@ -3,18 +3,7 @@ import {
   Bot, Zap, DollarSign, Hash, RefreshCw,
   ChevronDown, ChevronRight, Wrench, AlertCircle, CheckCircle, Clock,
 } from 'lucide-react';
-import { auth } from './firebase';
-
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
-
-async function authHeaders() {
-  const user = auth.currentUser ?? await new Promise(resolve => {
-    const unsub = auth.onAuthStateChanged(u => { unsub(); resolve(u); });
-  });
-  if (!user) return {};
-  const token = await user.getIdToken();
-  return { Authorization: `Bearer ${token}` };
-}
 
 const STATUS_META = {
   completed:    { label: 'Completed',    color: '#4ade80', bg: 'rgba(34,197,94,0.12)',   border: 'rgba(34,197,94,0.25)'   },
@@ -197,7 +186,11 @@ function SummaryCard({ icon: Icon, label, value, sub, gradient }) {
   );
 }
 
-export default function AgentRunsPage() {
+export default function AgentRunsPage({ getToken }) {
+  const authHeaders = async () => {
+    const token = await getToken();
+    return token ? { Authorization: `Bearer ${token}` } : {};
+  };
   const [runs, setRuns]         = useState([]);
   const [loading, setLoading]   = useState(true);
   const [error, setError]       = useState('');
