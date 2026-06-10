@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import {
-  Bot, Zap, DollarSign, Hash, RefreshCw,
-  ChevronDown, ChevronRight, Wrench, AlertCircle, CheckCircle, Clock,
+  Bot, RefreshCw, Wrench, AlertCircle, User, Cpu,
+  ChevronDown, ChevronRight, Search,
 } from 'lucide-react';
+
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
 
 const STATUS_META = {
@@ -17,13 +18,18 @@ function StatusBadge({ status }) {
   return (
     <span style={{
       background: m.bg, color: m.color, border: `1px solid ${m.border}`,
-      padding: '2px 8px', borderRadius: '4px', fontSize: '0.7rem',
+      padding: '2px 7px', borderRadius: 4, fontSize: '0.67rem',
       fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em',
       whiteSpace: 'nowrap',
     }}>
       {m.label}
     </span>
   );
+}
+
+function fmtMs(ms) {
+  if (!ms && ms !== 0) return '—';
+  return ms < 1000 ? `${Math.round(ms)}ms` : `${(ms / 1000).toFixed(2)}s`;
 }
 
 function fmt(iso) {
@@ -33,180 +39,314 @@ function fmt(iso) {
   });
 }
 
-function fmtMs(ms) {
-  if (!ms && ms !== 0) return '—';
-  return ms < 1000 ? `${Math.round(ms)} ms` : `${(ms / 1000).toFixed(2)} s`;
-}
+// ── Left panel: run card ──────────────────────────────────────────────────────
 
-function ToolChip({ name }) {
+function RunCard({ run, selected, onClick }) {
   return (
-    <span style={{
-      display: 'inline-flex', alignItems: 'center', gap: 4,
-      background: 'rgba(124,109,240,0.1)', border: '1px solid rgba(124,109,240,0.25)',
-      color: 'var(--accent-hover)', borderRadius: 4, padding: '2px 8px',
-      fontSize: '0.75rem', fontFamily: 'monospace', fontWeight: 500,
-    }}>
-      <Wrench size={11} />
-      {name}
-    </span>
+    <div className={`lg-run-card${selected ? ' lg-run-card--selected' : ''}`} onClick={onClick}>
+      <div className="lg-run-card-top">
+        <span className="agent-name-badge">{run.agent_name}</span>
+        <StatusBadge status={run.status} />
+      </div>
+      <div className="lg-run-card-model">{run.model}</div>
+      {run.query && (
+        <div className="lg-run-card-query">
+          {run.query.length > 70 ? run.query.slice(0, 70) + '…' : run.query}
+        </div>
+      )}
+      <div className="lg-run-card-stats">
+        <span>{fmtMs(run.latency_ms)}</span>
+        <span className="lg-dot">·</span>
+        <span>
+          <span style={{ color: '#60a5fa' }}>{run.tokens_in}↑</span>
+          {' '}
+          <span style={{ color: '#4ade80' }}>{run.tokens_out}↓</span>
+        </span>
+        <span className="lg-dot">·</span>
+        <span>₹{(run.cost_inr || 0).toFixed(4)}</span>
+      </div>
+      <div className="lg-run-card-time">{fmt(run.started_at)}</div>
+    </div>
   );
 }
 
-function RunRow({ run }) {
-  const [open, setOpen] = useState(false);
-  const toolsCalled  = run.tools_called  || [];
-  const toolsDefined = run.tools_defined || [];
+// ── Output trace: individual message bubbles ──────────────────────────────────
 
-  let parsedInput = null;
-  try { parsedInput = toolsCalled.map(t => ({ ...t, inputParsed: JSON.parse(t.input) })); }
-  catch { parsedInput = toolsCalled; }
+function ToolCallCard({ tc }) {
+  const [open, setOpen] = useState(false);
+  let args = {};
+  try { args = JSON.parse(tc.function.arguments); } catch { args = tc.function.arguments; }
 
   return (
-    <>
-      <tr
-        className="agent-run-row"
-        onClick={() => setOpen(o => !o)}
-      >
-        <td className="agent-td-expand">
-          {open ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
-        </td>
-        <td className="agent-td">
-          <span className="agent-name-badge">{run.agent_name}</span>
-        </td>
-        <td className="agent-td agent-td-mono">{run.model}</td>
-        <td className="agent-td agent-td-query">
-          {run.query ? run.query.slice(0, 80) + (run.query.length > 80 ? '…' : '') : <span style={{ color: 'var(--text-muted)' }}>—</span>}
-        </td>
-        <td className="agent-td"><StatusBadge status={run.status} /></td>
-        <td className="agent-td agent-td-mono">
-          {(run.tokens_in + run.tokens_out).toLocaleString()}
-          <span className="agent-td-sub">&nbsp;({run.tokens_in}↑ {run.tokens_out}↓)</span>
-        </td>
-        <td className="agent-td agent-td-mono">
-          ₹{(run.cost_inr || 0).toFixed(4)}
-          <span className="agent-td-sub">&nbsp;${(run.cost_usd || 0).toFixed(6)}</span>
-        </td>
-        <td className="agent-td agent-td-mono">{fmtMs(run.latency_ms)}</td>
-        <td className="agent-td agent-td-dim">{fmt(run.started_at)}</td>
-      </tr>
-
+    <div className="lg-tool-call-card" onClick={() => setOpen(o => !o)}>
+      <div className="lg-tool-call-header">
+        <Wrench size={11} style={{ color: '#a78bfa' }} />
+        <span className="lg-tool-call-name">{tc.function.name}</span>
+        <span style={{ marginLeft: 'auto', color: 'var(--text-muted)' }}>
+          {open ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+        </span>
+      </div>
       {open && (
-        <tr>
-          <td colSpan={9} style={{ padding: 0 }}>
-            <div className="agent-run-detail">
+        <pre className="lg-tool-call-args">
+          {typeof args === 'object' ? JSON.stringify(args, null, 2) : String(args)}
+        </pre>
+      )}
+    </div>
+  );
+}
 
-              <div className="agent-detail-grid">
-                {/* Query */}
-                <div className="agent-detail-block">
-                  <div className="agent-detail-label">Input</div>
-                  <div className="agent-detail-text">{run.query || '—'}</div>
+function MessageBubble({ msg }) {
+  if (msg.role === 'user') {
+    return (
+      <div className="lg-msg lg-msg--user">
+        <div className="lg-msg-icon lg-msg-icon--user"><User size={12} /></div>
+        <div className="lg-msg-body">
+          <div className="lg-msg-role">User</div>
+          <div className="lg-msg-text">{msg.content}</div>
+        </div>
+      </div>
+    );
+  }
+
+  if (msg.role === 'assistant') {
+    const hasCalls = msg.tool_calls?.length > 0;
+    const hasText  = msg.content && msg.content.trim();
+    return (
+      <div className="lg-msg lg-msg--ai">
+        <div className="lg-msg-icon lg-msg-icon--ai"><Cpu size={12} /></div>
+        <div className="lg-msg-body">
+          <div className="lg-msg-role">AI</div>
+          {hasCalls && (
+            <div className="lg-tool-calls-list">
+              {msg.tool_calls.map((tc, i) => <ToolCallCard key={i} tc={tc} />)}
+            </div>
+          )}
+          {hasText && <div className="lg-msg-text">{msg.content}</div>}
+        </div>
+      </div>
+    );
+  }
+
+  if (msg.role === 'tool') {
+    return (
+      <div className="lg-msg lg-msg--tool">
+        <div className="lg-msg-icon lg-msg-icon--tool"><Wrench size={11} /></div>
+        <div className="lg-msg-body">
+          <div className="lg-msg-role">
+            <span style={{ color: '#a78bfa' }}>{msg.name}</span>
+            <span style={{ color: 'var(--text-muted)' }}> result</span>
+          </div>
+          <div className="lg-msg-text lg-msg-text--tool">{msg.content}</div>
+        </div>
+      </div>
+    );
+  }
+
+  return null;
+}
+
+// ── Right panel: detail view ──────────────────────────────────────────────────
+
+function RunDetail({ run }) {
+  const [tab, setTab] = useState('output');
+
+  const messages = useMemo(() => {
+    if (!run.messages?.length) return [];
+    return run.messages;
+  }, [run.run_id]);
+
+  const toolsDefined = run.tools_defined || [];
+  const toolsCalled  = run.tools_called  || [];
+
+  return (
+    <div className="lg-detail">
+      {/* Header */}
+      <div className="lg-detail-header">
+        <div className="lg-detail-header-left">
+          <span className="lg-detail-agent">{run.agent_name}</span>
+          <span className="lg-detail-model-badge">{run.model}</span>
+          <StatusBadge status={run.status} />
+        </div>
+        <div className="lg-detail-header-stats">
+          <span className="lg-hstat">
+            <span className="lg-hstat-label">latency</span>
+            {fmtMs(run.latency_ms)}
+          </span>
+          <span className="lg-hstat-sep" />
+          <span className="lg-hstat">
+            <span className="lg-hstat-label">tokens</span>
+            <span style={{ color: '#60a5fa' }}>{run.tokens_in.toLocaleString()}↑</span>
+            {' / '}
+            <span style={{ color: '#4ade80' }}>{run.tokens_out.toLocaleString()}↓</span>
+          </span>
+          <span className="lg-hstat-sep" />
+          <span className="lg-hstat">
+            <span className="lg-hstat-label">cost</span>
+            ₹{(run.cost_inr || 0).toFixed(4)}
+            <span style={{ color: 'var(--text-muted)', marginLeft: 4 }}>
+              ${(run.cost_usd || 0).toFixed(6)}
+            </span>
+          </span>
+        </div>
+      </div>
+
+      {/* Tabs */}
+      <div className="lg-tabs">
+        {[
+          { id: 'input',  label: 'Input'  },
+          { id: 'output', label: 'Output' },
+          { id: 'tools',  label: 'Tools', count: toolsCalled.length },
+        ].map(({ id, label, count }) => (
+          <button
+            key={id}
+            className={`lg-tab${tab === id ? ' lg-tab--active' : ''}`}
+            onClick={() => setTab(id)}
+          >
+            {label}
+            {count > 0 && <span className="lg-tab-count">{count}</span>}
+          </button>
+        ))}
+      </div>
+
+      {/* Body */}
+      <div className="lg-detail-body">
+
+        {/* INPUT TAB */}
+        {tab === 'input' && (
+          <div className="lg-input-section">
+            <div className="lg-section-label">Query</div>
+            <div className="lg-input-text">{run.query || '—'}</div>
+            <div className="lg-token-row">
+              <div className="lg-token-card">
+                <div className="lg-token-label">Input tokens</div>
+                <div className="lg-token-value" style={{ color: '#60a5fa' }}>
+                  {run.tokens_in.toLocaleString()}
                 </div>
-
-                {/* Response */}
-                {run.response && (
-                  <div className="agent-detail-block">
-                    <div className="agent-detail-label">Output</div>
-                    <div className="agent-detail-text">{run.response}</div>
-                  </div>
-                )}
-
-                {/* Error */}
-                {run.error && (
-                  <div className="agent-detail-block agent-detail-error">
-                    <div className="agent-detail-label" style={{ color: '#f87171' }}>
-                      <AlertCircle size={13} style={{ verticalAlign: -2 }} /> Error
-                    </div>
-                    <div className="agent-detail-text">{run.error}</div>
-                  </div>
-                )}
               </div>
-
-              <div className="agent-detail-row">
-                {/* Tools defined */}
-                {toolsDefined.length > 0 && (
-                  <div className="agent-detail-section">
-                    <div className="agent-detail-label">Tools available ({toolsDefined.length})</div>
-                    <div className="agent-tool-chips">
-                      {toolsDefined.map((t, i) => (
-                        <ToolChip key={i} name={t?.function?.name || t?.name || String(i)} />
-                      ))}
-                    </div>
-                  </div>
-                )}
-
-                {/* Tools called */}
-                {toolsCalled.length > 0 && (
-                  <div className="agent-detail-section">
-                    <div className="agent-detail-label">Tools invoked ({toolsCalled.length})</div>
-                    {(parsedInput || toolsCalled).map((t, i) => (
-                      <div key={i} className="agent-tool-call-card">
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6 }}>
-                          <Wrench size={12} style={{ color: 'var(--accent)' }} />
-                          <span style={{ fontFamily: 'monospace', fontWeight: 600, fontSize: '0.82rem' }}>
-                            {t.name}
-                          </span>
-                        </div>
-                        <pre className="agent-tool-input">
-                          {typeof t.inputParsed === 'object'
-                            ? JSON.stringify(t.inputParsed, null, 2)
-                            : t.input}
-                        </pre>
-                      </div>
-                    ))}
-                  </div>
-                )}
+              <div className="lg-token-card">
+                <div className="lg-token-label">Output tokens</div>
+                <div className="lg-token-value" style={{ color: '#4ade80' }}>
+                  {run.tokens_out.toLocaleString()}
+                </div>
               </div>
-
-              {/* Meta row */}
-              <div className="agent-detail-meta">
-                <span>Run ID: <code>{run.run_id}</code></span>
-                {run.finished_at && <span>Finished: {fmt(run.finished_at)}</span>}
-                <span>Latency: {fmtMs(run.latency_ms)}</span>
+              <div className="lg-token-card">
+                <div className="lg-token-label">Total tokens</div>
+                <div className="lg-token-value">
+                  {(run.tokens_in + run.tokens_out).toLocaleString()}
+                </div>
+              </div>
+              <div className="lg-token-card">
+                <div className="lg-token-label">Started</div>
+                <div className="lg-token-value" style={{ fontSize: '0.82rem' }}>
+                  {fmt(run.started_at)}
+                </div>
               </div>
             </div>
-          </td>
-        </tr>
-      )}
-    </>
-  );
-}
+          </div>
+        )}
 
-function SummaryCard({ icon: Icon, label, value, sub, gradient }) {
-  return (
-    <div className="metric-card">
-      <div className="metric-card-icon" style={{ background: gradient }}>
-        <Icon size={18} />
-      </div>
-      <div className="metric-card-body">
-        <p className="metric-card-label">{label}</p>
-        <p className="metric-card-value">{value}</p>
-        {sub && <p className="metric-card-sub">{sub}</p>}
+        {/* OUTPUT TAB */}
+        {tab === 'output' && (
+          <div className="lg-trace">
+            {run.error && (
+              <div className="lg-error-banner">
+                <AlertCircle size={13} style={{ flexShrink: 0 }} />
+                {run.error}
+              </div>
+            )}
+            {messages.length > 0
+              ? messages.map((msg, i) => <MessageBubble key={i} msg={msg} />)
+              : (
+                <>
+                  {run.query   && <MessageBubble msg={{ role: 'user',      content: run.query    }} />}
+                  {run.response && <MessageBubble msg={{ role: 'assistant', content: run.response }} />}
+                </>
+              )
+            }
+          </div>
+        )}
+
+        {/* TOOLS TAB */}
+        {tab === 'tools' && (
+          <div className="lg-tools-section">
+            {toolsDefined.length > 0 && (
+              <div className="lg-tools-group">
+                <div className="lg-section-label">Available ({toolsDefined.length})</div>
+                <div className="lg-tools-grid">
+                  {toolsDefined.map((t, i) => {
+                    const name = t?.function?.name || t?.name || `tool_${i}`;
+                    const desc = t?.function?.description || t?.description || '';
+                    return (
+                      <div key={i} className="lg-tool-def-card">
+                        <div className="lg-tool-def-name">
+                          <Wrench size={11} style={{ color: '#a78bfa' }} /> {name}
+                        </div>
+                        {desc && <div className="lg-tool-def-desc">{desc}</div>}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
+            {toolsCalled.length > 0 && (
+              <div className="lg-tools-group">
+                <div className="lg-section-label">Invoked in order ({toolsCalled.length})</div>
+                {toolsCalled.map((t, i) => {
+                  let args = {};
+                  try { args = JSON.parse(t.input); } catch { args = t.input; }
+                  return (
+                    <div key={i} className="lg-tool-invoked-card">
+                      <div className="lg-tool-invoked-header">
+                        <span className="lg-tool-step">{i + 1}</span>
+                        <Wrench size={11} style={{ color: '#a78bfa' }} />
+                        <span className="lg-tool-invoked-name">{t.name}</span>
+                      </div>
+                      <pre className="agent-tool-input">
+                        {typeof args === 'object' ? JSON.stringify(args, null, 2) : String(args)}
+                      </pre>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+
+            {toolsDefined.length === 0 && toolsCalled.length === 0 && (
+              <div style={{ color: 'var(--text-muted)', padding: '2rem', textAlign: 'center', fontSize: '0.85rem' }}>
+                No tools were used in this run.
+              </div>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );
 }
+
+// ── Page root ─────────────────────────────────────────────────────────────────
 
 export default function AgentRunsPage({ getToken }) {
   const authHeaders = async () => {
     const token = await getToken();
     return token ? { Authorization: `Bearer ${token}` } : {};
   };
-  const [runs, setRuns]         = useState([]);
-  const [loading, setLoading]   = useState(true);
-  const [error, setError]       = useState('');
-  const [search, setSearch]     = useState('');
-  const [filterModel, setModel] = useState('all');
+
+  const [runs, setRuns]           = useState([]);
+  const [loading, setLoading]     = useState(true);
+  const [error, setError]         = useState('');
+  const [search, setSearch]       = useState('');
+  const [filterModel, setModel]   = useState('all');
   const [filterStatus, setStatus] = useState('all');
+  const [selectedId, setSelectedId] = useState(null);
 
   const fetchRuns = async () => {
-    setLoading(true);
-    setError('');
+    setLoading(true); setError('');
     try {
-      const res = await fetch(`${API_BASE_URL}/v1/agent/runs`, {
-        headers: await authHeaders(),
-      });
+      const res = await fetch(`${API_BASE_URL}/v1/agent/runs`, { headers: await authHeaders() });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      setRuns(await res.json());
+      const data = await res.json();
+      setRuns(data);
+      if (data.length > 0 && !selectedId) setSelectedId(data[0].run_id);
     } catch (e) {
       setError(`Could not load runs: ${e.message}`);
     } finally {
@@ -232,14 +372,7 @@ export default function AgentRunsPage({ getToken }) {
     return true;
   }), [runs, filterStatus, filterModel, search]);
 
-  const stats = useMemo(() => {
-    const total    = runs.length;
-    const cost_inr = runs.reduce((s, r) => s + (r.cost_inr || 0), 0);
-    const tokens   = runs.reduce((s, r) => s + r.tokens_in + r.tokens_out, 0);
-    const lats     = runs.filter(r => r.latency_ms).map(r => r.latency_ms);
-    const avg_lat  = lats.length ? lats.reduce((a, b) => a + b, 0) / lats.length : 0;
-    return { total, cost_inr, tokens, avg_lat };
-  }, [runs]);
+  const selectedRun = filtered.find(r => r.run_id === selectedId) || filtered[0] || null;
 
   return (
     <main className="metrics-main">
@@ -253,98 +386,74 @@ export default function AgentRunsPage({ getToken }) {
         </button>
       </header>
 
-      <div className="metrics-body">
-        {/* Summary cards */}
-        <div className="metric-cards-grid" style={{ marginBottom: '1.5rem' }}>
-          <SummaryCard
-            icon={Bot} label="Total Runs" value={stats.total}
-            sub={`${filtered.length} shown`}
-            gradient="linear-gradient(135deg,#7c6df0,#c084fc)"
-          />
-          <SummaryCard
-            icon={DollarSign} label="Total Cost"
-            value={`₹${stats.cost_inr.toFixed(4)}`}
-            sub={`$${runs.reduce((s, r) => s + (r.cost_usd || 0), 0).toFixed(6)}`}
-            gradient="linear-gradient(135deg,#10b981,#34d399)"
-          />
-          <SummaryCard
-            icon={Hash} label="Total Tokens"
-            value={stats.tokens >= 1000 ? `${(stats.tokens / 1000).toFixed(1)}k` : stats.tokens}
-            sub={`across ${stats.total} runs`}
-            gradient="linear-gradient(135deg,#f59e0b,#fcd34d)"
-          />
-          <SummaryCard
-            icon={Zap} label="Avg Latency"
-            value={fmtMs(stats.avg_lat)}
-            sub="per LLM call"
-            gradient="linear-gradient(135deg,#3b82f6,#93c5fd)"
-          />
-        </div>
-
-        {/* Filters */}
-        <div className="agent-filter-bar">
-          <input
-            className="agent-search"
-            placeholder="Search by agent name, query, or model…"
-            value={search}
-            onChange={e => setSearch(e.target.value)}
-          />
-          <select className="agent-filter-select" value={filterModel} onChange={e => setModel(e.target.value)}>
-            <option value="all">All models</option>
-            {allModels.map(m => <option key={m} value={m}>{m}</option>)}
-          </select>
-          <select className="agent-filter-select" value={filterStatus} onChange={e => setStatus(e.target.value)}>
-            <option value="all">All statuses</option>
-            <option value="completed">Completed</option>
-            <option value="tool_pending">Tool Pending</option>
-            <option value="error">Error</option>
-          </select>
-        </div>
-
-        {/* Error */}
-        {error && (
-          <div className="auth-error" style={{ marginBottom: '1rem' }}>{error}</div>
-        )}
-
-        {/* Table */}
-        {loading ? (
-          <div style={{ textAlign: 'center', color: 'var(--text-muted)', padding: '3rem' }}>
-            Loading runs…
+      <div className="lg-layout">
+        {/* ── Left panel ── */}
+        <div className="lg-left">
+          <div className="lg-filter-bar">
+            <div className="lg-search-wrap">
+              <Search size={13} className="lg-search-icon" />
+              <input
+                className="lg-search"
+                placeholder="Search…"
+                value={search}
+                onChange={e => setSearch(e.target.value)}
+              />
+            </div>
+            <div style={{ display: 'flex', gap: '0.4rem' }}>
+              <select className="agent-filter-select" style={{ flex: 1, fontSize: '0.78rem' }} value={filterModel} onChange={e => setModel(e.target.value)}>
+                <option value="all">All models</option>
+                {allModels.map(m => <option key={m} value={m}>{m}</option>)}
+              </select>
+              <select className="agent-filter-select" style={{ flex: 1, fontSize: '0.78rem' }} value={filterStatus} onChange={e => setStatus(e.target.value)}>
+                <option value="all">All status</option>
+                <option value="completed">Completed</option>
+                <option value="tool_pending">Tool Pending</option>
+                <option value="error">Error</option>
+              </select>
+            </div>
           </div>
-        ) : filtered.length === 0 ? (
-          <div className="agent-empty-state">
-            <Bot size={40} style={{ color: 'var(--text-muted)', marginBottom: '1rem' }} />
-            <p style={{ color: 'var(--text-muted)', marginBottom: '0.5rem' }}>
-              {runs.length === 0 ? 'No agent runs yet.' : 'No runs match your filters.'}
-            </p>
-            {runs.length === 0 && (
+
+          {error && (
+            <div className="auth-error" style={{ margin: '0 0 0.75rem', fontSize: '0.8rem' }}>{error}</div>
+          )}
+
+          {loading ? (
+            <div style={{ color: 'var(--text-muted)', padding: '2rem', textAlign: 'center', fontSize: '0.85rem' }}>
+              Loading…
+            </div>
+          ) : filtered.length === 0 ? (
+            <div className="agent-empty-state">
+              <Bot size={34} style={{ color: 'var(--text-muted)', marginBottom: '0.75rem' }} />
               <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>
-                Use your API key with <code style={{ background: 'var(--glass)', padding: '1px 6px', borderRadius: 3 }}>POST /v1/agent/run</code> to start tracking.
+                {runs.length === 0 ? 'No runs yet.' : 'No matches.'}
               </p>
-            )}
-          </div>
-        ) : (
-          <div className="agent-table-wrap">
-            <table className="agent-runs-table">
-              <thead>
-                <tr>
-                  <th style={{ width: 28 }} />
-                  <th>Agent</th>
-                  <th>Model</th>
-                  <th>Query</th>
-                  <th>Status</th>
-                  <th>Tokens</th>
-                  <th>Cost</th>
-                  <th>Latency</th>
-                  <th>Started</th>
-                </tr>
-              </thead>
-              <tbody>
-                {filtered.map(run => <RunRow key={run.run_id} run={run} />)}
-              </tbody>
-            </table>
-          </div>
-        )}
+            </div>
+          ) : (
+            <div className="lg-run-list">
+              {filtered.map(run => (
+                <RunCard
+                  key={run.run_id}
+                  run={run}
+                  selected={selectedRun?.run_id === run.run_id}
+                  onClick={() => setSelectedId(run.run_id)}
+                />
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* ── Right panel ── */}
+        <div className="lg-right">
+          {selectedRun
+            ? <RunDetail run={selectedRun} />
+            : (
+              <div className="lg-empty-detail">
+                <Bot size={38} style={{ color: 'var(--text-muted)', marginBottom: '0.75rem' }} />
+                <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>Select a run to inspect</p>
+              </div>
+            )
+          }
+        </div>
       </div>
     </main>
   );

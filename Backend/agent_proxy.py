@@ -368,6 +368,7 @@ def list_runs(request: Request, limit: int = 100):
                 "latency_ms":    r.latency_ms,
                 "tools_defined": json.loads(r.tools_defined) if r.tools_defined else [],
                 "tools_called":  json.loads(r.tools_called)  if r.tools_called  else [],
+                "messages":      json.loads(r.messages)       if r.messages       else [],
                 "started_at":    r.started_at.isoformat()    if r.started_at    else None,
                 "finished_at":   r.finished_at.isoformat()   if r.finished_at   else None,
                 "error":         r.error,
