@@ -18,6 +18,7 @@ from analytics import router as analytics_router
 from api_keys import router as api_keys_router
 from admin_auth import router as admin_router
 from agent_proxy import router as agent_proxy_router
+from sdk_log import router as sdk_log_router
 from fastapi.openapi.utils import get_openapi
 load_dotenv()
 logging.basicConfig(level=logging.INFO)
@@ -28,6 +29,7 @@ import asyncio
 import base64
 import io
 import json
+import uuid
 
 import httpx
 import PyPDF2
@@ -44,7 +46,7 @@ from memory import (
     summarize_in_background,
 )
 from memory.store import delete as delete_session
-from database import init_db, upsert_user, upsert_session, log_query, save_pdf_chunks, load_pdf_chunks, SessionLocal
+from database import init_db, upsert_user, upsert_session, log_query, save_pdf_chunks, load_pdf_chunks, SessionLocal, create_agent_run, set_agent_run_progress
 
 
 # ── env ───────────────────────────────────────────────────────────────────────
@@ -174,6 +176,7 @@ app.include_router(analytics_router)
 app.include_router(api_keys_router)
 app.include_router(admin_router)
 app.include_router(agent_proxy_router)
+app.include_router(sdk_log_router)
 origins = [o.strip() for o in os.getenv("ALLOWED_ORIGINS", "").split(",") if o.strip()]
 if not origins:
     origins = ["http://localhost:5173", "http://127.0.0.1:5173"]
@@ -436,6 +439,48 @@ def _persist_query(
 
 
 
+def _persist_chat_run(
+    run_id:    str,
+    user_id:   str,
+    model:     str,
+    query:     str | None,
+    messages:  str,
+    response:  str,
+    tokens_in: int,
+    tokens_out: int,
+    cost_usd:  float,
+    cost_inr:  float,
+    latency_ms: float,
+) -> None:
+    db = SessionLocal()
+    try:
+        create_agent_run(
+            db,
+            run_id        = run_id,
+            user_id       = user_id,
+            agent_name    = "sdk",
+            model         = model,
+            query         = query,
+            tools_defined = None,
+            messages      = messages,
+        )
+        set_agent_run_progress(
+            db, run_id,
+            status     = "completed",
+            tokens_in  = tokens_in,
+            tokens_out = tokens_out,
+            cost_usd   = cost_usd,
+            cost_inr   = cost_inr,
+            latency_ms = latency_ms,
+            response   = response,
+        )
+    except Exception as exc:
+        logger.error("DB persist_chat_run failed: %s", exc)
+        db.rollback()
+    finally:
+        db.close()
+
+
 # ── endpoints ─────────────────────────────────────────────────────────────────
 
 @app.post("/chat", response_model=ChatResponse)
@@ -547,6 +592,8 @@ async def chat(req: ChatRequest, background_tasks: BackgroundTasks, request: Req
 
     cost = compute_cost(prompt_tokens, completion_tokens, req.model)
 
+    run_id = str(uuid.uuid4())
+
     background_tasks.add_task(
         summarize_in_background,
         req.session_id, overflow, old_summary, call_llm,
@@ -559,6 +606,14 @@ async def chat(req: ChatRequest, background_tasks: BackgroundTasks, request: Req
         req.message[:500], bool(pdf_context), "pdf" if pdf_context else None,
         None,
         name or email or None,
+    )
+    background_tasks.add_task(
+        _persist_chat_run,
+        run_id, req.user_id, req.model,
+        req.message[:1000],
+        json.dumps(messages + [{"role": "assistant", "content": reply}]),
+        reply, prompt_tokens, completion_tokens,
+        cost["usd"], cost["inr"], latency_ms,
     )
 
     return ChatResponse(
