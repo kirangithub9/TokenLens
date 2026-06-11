@@ -31,10 +31,15 @@ function App() {
       if (user) {
         try {
           const token = await user.getIdToken();
-          // Register user in DB on every login
+          const signupOrg  = localStorage.getItem('signup_organization') || null;
+          const signupRole = localStorage.getItem('signup_role') || null;
+          localStorage.removeItem('signup_organization');
+          localStorage.removeItem('signup_role');
+          // Register user in DB on every login; pass signup profile fields on first registration
           await fetch(`${API_BASE_URL}/admin/register`, {
             method: 'POST',
-            headers: { Authorization: `Bearer ${token}` },
+            headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ organization: signupOrg, role: signupRole }),
           });
           // Check admin status
           const res = await fetch(`${API_BASE_URL}/admin/check`, {

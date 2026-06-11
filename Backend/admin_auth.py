@@ -8,8 +8,15 @@ Reads ADMIN_EMAILS from .env and exposes:
 """
 
 import os
+from typing import Optional
 from fastapi import APIRouter, HTTPException, Request
+from pydantic import BaseModel
 from database import SessionLocal, upsert_user
+
+
+class RegisterBody(BaseModel):
+    organization: Optional[str] = None
+    role: Optional[str] = None
 
 router = APIRouter(prefix="/admin", tags=["Admin"])
 
@@ -40,7 +47,7 @@ def check_admin(request: Request):
 
 
 @router.post("/register")
-def register_user(request: Request):
+def register_user(request: Request, body: RegisterBody = RegisterBody()):
     """Called by the frontend on every login to ensure the user exists in user_profiles."""
     user = getattr(request.state, "user", None)
     if not user or not user.get("uid"):
@@ -49,7 +56,12 @@ def register_user(request: Request):
     display_name = user.get("name") or user.get("email") or None
     db = SessionLocal()
     try:
-        upsert_user(db, uid, display_name=display_name)
+        upsert_user(
+            db, uid,
+            display_name=display_name,
+            organization=body.organization or None,
+            role=body.role or None,
+        )
     finally:
         db.close()
     return {"registered": True, "user_id": uid}

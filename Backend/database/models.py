@@ -15,10 +15,12 @@ class UserProfile(Base):
     """
     __tablename__ = "user_profiles"
 
-    user_id      = Column(String(64), primary_key=True)
-    display_name = Column(String(64), nullable=True)          # e.g. "User-a3f9b2"
-    created_at   = Column(DateTime,   nullable=False, default=datetime.utcnow)
-    last_seen    = Column(DateTime,   nullable=False, default=datetime.utcnow)
+    user_id      = Column(String(64),  primary_key=True)
+    display_name = Column(String(64),  nullable=True)
+    organization = Column(String(128), nullable=True)
+    role         = Column(String(64),  nullable=True)
+    created_at   = Column(DateTime,    nullable=False, default=datetime.utcnow)
+    last_seen    = Column(DateTime,    nullable=False, default=datetime.utcnow)
 
 
 class ChatSession(Base):
