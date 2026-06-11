@@ -299,6 +299,43 @@ def get_agent_runs_for_user(db: Session, user_id: str, limit: int = 100) -> list
     )
 
 
+def log_sdk_agent_run(
+    db: Session,
+    *,
+    user_id:    str,
+    agent_name: str,
+    model:      str,
+    query_text: str | None,
+    response_text: str | None,
+    tokens_in:  int,
+    tokens_out: int,
+    cost_usd:   float,
+    cost_inr:   float,
+    latency_ms: float,
+) -> AgentRun:
+    """Create a completed AgentRun row from an SDK log call."""
+    now = datetime.utcnow()
+    record = AgentRun(
+        run_id      = str(uuid.uuid4()),
+        user_id     = user_id,
+        agent_name  = agent_name,
+        model       = model,
+        query       = (query_text or "")[:1000] or None,
+        response    = (response_text or "")[:2000] or None,
+        status      = "completed",
+        tokens_in   = tokens_in,
+        tokens_out  = tokens_out,
+        cost_usd    = cost_usd,
+        cost_inr    = cost_inr,
+        latency_ms  = round(latency_ms, 2),
+        started_at  = now,
+        finished_at = now,
+    )
+    db.add(record)
+    db.commit()
+    return record
+
+
 def log_api_usage(
     db:          Session,
     *,

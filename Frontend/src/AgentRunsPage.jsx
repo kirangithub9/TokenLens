@@ -178,6 +178,10 @@ function RunDetail({ run }) {
             <span style={{ color: '#60a5fa' }}>{run.tokens_in.toLocaleString()}↑</span>
             {' / '}
             <span style={{ color: '#4ade80' }}>{run.tokens_out.toLocaleString()}↓</span>
+            {' / '}
+            <span style={{ color: 'var(--text-muted)' }}>
+              {(run.tokens_in + run.tokens_out).toLocaleString()} total
+            </span>
           </span>
           <span className="lg-hstat-sep" />
           <span className="lg-hstat">
@@ -231,8 +235,20 @@ function RunDetail({ run }) {
               </div>
               <div className="lg-token-card">
                 <div className="lg-token-label">Total tokens</div>
-                <div className="lg-token-value">
+                <div className="lg-token-value" style={{ color: '#e2e8f0' }}>
                   {(run.tokens_in + run.tokens_out).toLocaleString()}
+                </div>
+              </div>
+              <div className="lg-token-card">
+                <div className="lg-token-label">Cost (USD)</div>
+                <div className="lg-token-value" style={{ color: '#fbbf24', fontSize: '0.92rem' }}>
+                  ${(run.cost_usd || 0).toFixed(6)}
+                </div>
+              </div>
+              <div className="lg-token-card">
+                <div className="lg-token-label">Cost (INR)</div>
+                <div className="lg-token-value" style={{ color: '#f97316', fontSize: '0.92rem' }}>
+                  ₹{(run.cost_inr || 0).toFixed(4)}
                 </div>
               </div>
               <div className="lg-token-card">
@@ -258,8 +274,13 @@ function RunDetail({ run }) {
               ? messages.map((msg, i) => <MessageBubble key={i} msg={msg} />)
               : (
                 <>
-                  {run.query   && <MessageBubble msg={{ role: 'user',      content: run.query    }} />}
+                  {run.query    && <MessageBubble msg={{ role: 'user',      content: run.query    }} />}
                   {run.response && <MessageBubble msg={{ role: 'assistant', content: run.response }} />}
+                  {!run.query && !run.response && (
+                    <div style={{ color: 'var(--text-muted)', padding: '2rem', textAlign: 'center', fontSize: '0.85rem' }}>
+                      No conversation trace captured.
+                    </div>
+                  )}
                 </>
               )
             }

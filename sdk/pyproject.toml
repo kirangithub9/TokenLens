@@ -4,12 +4,12 @@ build-backend = "hatchling.build"
 
 [project]
 name = "tokenlens-sdk"
-version = "0.1.0"
+version = "0.2.0"
 description = "Python SDK for TokenLens — automatic token and cost tracking for AI requests"
 requires-python = ">=3.9"
 license = { text = "MIT" }
 authors = [{ name = "TokenLens", email = "nsandeep06595@gmail.com" }]
-keywords = ["ai", "llm", "tokens", "cost", "analytics", "openai", "anthropic", "observability"]
+keywords = ["ai", "llm", "tokens", "cost", "analytics", "openai", "anthropic", "gemini", "observability"]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",
@@ -21,14 +21,13 @@ classifiers = [
     "Programming Language :: Python :: 3.12",
     "Topic :: Software Development :: Libraries :: Python Modules",
 ]
+# All active provider SDKs are bundled — a single `pip install tokenlens` is enough.
+# To add a new provider: (1) create wrappers/<provider>.py, (2) add its package below.
 dependencies = [
     "httpx>=0.24.0",
+    "openai>=1.0.0",
+    "anthropic>=0.20.0",
 ]
-
-[project.optional-dependencies]
-openai    = ["openai>=1.0.0"]
-anthropic = ["anthropic>=0.20.0"]
-all       = ["openai>=1.0.0", "anthropic>=0.20.0"]
 
 [project.urls]
 Homepage   = "https://github.com/alumnx-ai-labs/TokenLens"
